@@ -1,134 +1,111 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
+import WeatherAPI from "weather_api/weather_api";
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+interface CGDWeatherPluginSettings {
+	updateInterval: number;
+	latitude: string;
+	longitude: string;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
+// 1 hour
+const DEFAULT_UPDATE_INTERVAL = 3600 * 1000;
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+// Moscow
+const DEFAULT_LATITUDE = "55.7522";
+const DEFAULT_LONGITUDE = "37.6156";
+
+const DEFAULT_SETTINGS: CGDWeatherPluginSettings = {
+	updateInterval: DEFAULT_UPDATE_INTERVAL,
+	latitude: DEFAULT_LATITUDE,
+	longitude: DEFAULT_LONGITUDE,
+};
+
+export default class CGDWeatherPlugin extends Plugin {
+	private statusBarEl: HTMLElement;
+	private weatherAPi: WeatherAPI;
+
+	settings: CGDWeatherPluginSettings;
 
 	async onload() {
 		await this.loadSettings();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+		this.weatherAPi = new WeatherAPI();
+		this.statusBarEl = this.addStatusBarItem();
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
+		this.registerInterval(
+			window.setInterval(() => {
+				this.updateStatusBar();
+			}, this.settings.updateInterval),
+		);
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, _view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+		this.updateStatusBar();
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		this.addSettingTab(new CGDWeatherPluginSettingTab(this.app, this));
 	}
 
-	onunload() {
+	onunload() {}
 
+	async updateStatusBar() {
+		const temperatue = await this.weatherAPi.getCurrent(
+			parseFloat(this.settings.latitude),
+			parseFloat(this.settings.longitude),
+		);
+
+		this.statusBarEl.setText(
+			`Current temperature: ${temperatue.toFixed(1)}°C`,
+		);
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData(),
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
+		await this.updateStatusBar();
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+class CGDWeatherPluginSettingTab extends PluginSettingTab {
+	plugin: CGDWeatherPlugin;
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: CGDWeatherPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
-
+		const { containerEl } = this;
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
+			.setName("Latitude")
+			.setDesc("Example: 55.7522")
+			.addText((text) =>
+				text
+					.setPlaceholder("Enter latitude (example: 55.7522)")
+					.setValue(this.plugin.settings.latitude)
+					.onChange(async (value) => {
+						this.plugin.settings.latitude = value;
+						await this.plugin.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Longitude")
+			.setDesc("Example: 37.6156")
+			.addText((text) =>
+				text
+					.setPlaceholder("Enter longitude (example: 37.6156)")
+					.setValue(this.plugin.settings.longitude)
+					.onChange(async (value) => {
+						this.plugin.settings.longitude = value;
+						await this.plugin.saveSettings();
+					}),
+			);
 	}
 }
