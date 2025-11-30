@@ -2,13 +2,13 @@ import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
 import WeatherAPI from "weather_api/weather_api";
 
 interface CGDWeatherPluginSettings {
-	updateInterval: number;
+	updateInterval: string;
 	latitude: string;
 	longitude: string;
 }
 
 // 1 hour
-const DEFAULT_UPDATE_INTERVAL = 3600 * 1000;
+const DEFAULT_UPDATE_INTERVAL = "3600";
 
 // Moscow
 const DEFAULT_LATITUDE = "55.7522";
@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS: CGDWeatherPluginSettings = {
 export default class CGDWeatherPlugin extends Plugin {
 	private statusBarEl: HTMLElement;
 	private weatherAPi: WeatherAPI;
+	private intervalID: number;
 
 	settings: CGDWeatherPluginSettings;
 
@@ -32,12 +33,7 @@ export default class CGDWeatherPlugin extends Plugin {
 		this.weatherAPi = new WeatherAPI();
 		this.statusBarEl = this.addStatusBarItem();
 
-		this.registerInterval(
-			window.setInterval(() => {
-				this.updateStatusBar();
-			}, this.settings.updateInterval),
-		);
-
+		this.startNewInterval();
 		this.updateStatusBar();
 
 		this.addSettingTab(new CGDWeatherPluginSettingTab(this.app, this));
@@ -66,7 +62,24 @@ export default class CGDWeatherPlugin extends Plugin {
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-		await this.updateStatusBar();
+	}
+
+	startNewInterval() {
+		if (typeof this.intervalID !== "undefined") {
+			window.clearInterval(this.intervalID);
+		}
+
+		const settingsUpdateInterval = parseInt(this.settings.updateInterval);
+		if (Number.isNaN(settingsUpdateInterval)) {
+			return;
+		}
+
+		const intervalId = window.setInterval(() => {
+			this.updateStatusBar();
+		}, settingsUpdateInterval * 1000);
+
+		this.registerInterval(intervalId);
+		this.intervalID = intervalId;
 	}
 }
 
@@ -82,6 +95,7 @@ class CGDWeatherPluginSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
+		// Latitude
 		new Setting(containerEl)
 			.setName("Latitude")
 			.setDesc("Example: 55.7522")
@@ -92,9 +106,11 @@ class CGDWeatherPluginSettingTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.latitude = value;
 						await this.plugin.saveSettings();
+						await this.plugin.updateStatusBar();
 					}),
 			);
 
+		// Longitude
 		new Setting(containerEl)
 			.setName("Longitude")
 			.setDesc("Example: 37.6156")
@@ -104,6 +120,22 @@ class CGDWeatherPluginSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.longitude)
 					.onChange(async (value) => {
 						this.plugin.settings.longitude = value;
+						await this.plugin.saveSettings();
+						await this.plugin.updateStatusBar();
+					}),
+			);
+
+		// Update interval
+		new Setting(containerEl)
+			.setName("Update interval")
+			.setDesc("In seconds. Example: 3600 (1 hour)")
+			.addText((text) =>
+				text
+					.setPlaceholder("Enter update interval (example: 3600)")
+					.setValue(this.plugin.settings.updateInterval)
+					.onChange(async (value) => {
+						this.plugin.settings.updateInterval = value;
+						this.plugin.startNewInterval();
 						await this.plugin.saveSettings();
 					}),
 			);
